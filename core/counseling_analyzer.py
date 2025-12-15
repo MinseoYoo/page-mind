@@ -1,75 +1,12 @@
 """
-심리 상담 챗봇 + 도서 추천 시스템
-비즈니스 로직 구현
+상담 내용 요약 및 분석
 """
 
 from typing import List
 import anthropic
 import json
-import requests
-from models import PsychologicalSummary, BookRecommendation
-from config import ANTHROPIC_API_KEY, NAVER_CLIENT_ID, NAVER_CLIENT_SECRET
+from models import PsychologicalSummary
 
-# ============================================================================
-# 1. 심리 상담 챗봇 핵심 로직
-# ============================================================================
-
-class PsychologyChatbot:
-    def __init__(self, anthropic_api_key: str):
-        self.client = anthropic.Anthropic(api_key=anthropic_api_key)
-        self.system_prompt = self._create_system_prompt()
-    
-    def _create_system_prompt(self) -> str:
-        return """당신은 따뜻하고 공감적인 심리 상담사입니다.
-
-## 핵심 역할
-
-1. **경청 (Active Listening)**
-   - 사용자의 감정을 반영하고 검증
-   - "~하게 느끼시는군요", "힘드셨겠어요"
-   - 비판단적 수용
-
-2. **탐색 (Gentle Exploration)**
-   - 부드럽고 개방적인 질문
-   - "그 상황에서 어떤 감정을 느꼈나요?"
-   - "구체적으로 어떤 점이 가장 힘드셨나요?"
-   - "그때 어떤 생각이 들었나요?"
-
-3. **지지 (Supportive Presence)**
-   - 따뜻한 격려
-   - 강점과 자원 찾기
-   - 작은 변화 인정
-
-## 중요: 하지 말아야 할 것
-
-- ❌ 복잡한 심리학 이론 설명
-- ❌ 즉각적인 해결책 제시
-- ❌ 분석이나 진단
-- ❌ 긴 설명
-
-## 응답 스타일
-
-- 짧고 따뜻하게 (2-4문장)
-- 감정 중심
-- 자연스러운 대화 흐름
-- 필요시 하나의 탐색 질문
-
-충분한 대화 후 분석은 별도로 진행됩니다. 지금은 사용자의 이야기를 듣는 데 집중하세요."""
-
-    def chat(self, messages: List[dict]) -> str:
-        """사용자와 대화"""
-        response = self.client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=1000,
-            system=self.system_prompt,
-            messages=messages
-        )
-        return response.content[0].text
-
-
-# ============================================================================
-# 2. 상담 내용 요약 및 분석
-# ============================================================================
 
 class CounselingAnalyzer:
     def __init__(self, anthropic_api_key: str):
@@ -351,7 +288,8 @@ class CounselingAnalyzer:
 }
 
 분석 도구 결과를 통합하여 작성하세요. 
-keywords는 도서 검색에 사용할 키워드로, 심리학 용어와 일반적인 단어를 균형있게 5-8개 포함하세요.
+keywords는 도서 검색에 사용할 키워드로, 사용자의 상태, 감정, 상황을 나타내는 일상적인 용어를 5-8개 포함하세요.
+심리학 전문 용어(예: 인지왜곡, 투사, 억압)보다는 일반인이 이해하기 쉬운 표현(예: 외로움, 자존감, 직장스트레스, 인간관계)을 사용하세요.
 오직 JSON만 출력하세요."""
         
         final_response = self.client.messages.create(
@@ -372,131 +310,4 @@ keywords는 도서 검색에 사용할 키워드로, 심리학 용어와 일반�
         
         summary_data = json.loads(response_text)
         return PsychologicalSummary(**summary_data)
-
-
-# ============================================================================
-# 3. 도서 검색 및 추천 (네이버 API 직접 호출)
-# ============================================================================
-
-class BookRecommender:
-    def __init__(self, anthropic_api_key: str):
-        self.client = anthropic.Anthropic(api_key=anthropic_api_key)
-    
-    async def search_books_via_api(self, keyword: str, display: int = 10) -> List[dict]:
-        """네이버 API를 직접 호출하여 책 검색"""
-        try:
-            url = "https://openapi.naver.com/v1/search/book.json"
-            headers = {
-                "X-Naver-Client-Id": NAVER_CLIENT_ID,
-                "X-Naver-Client-Secret": NAVER_CLIENT_SECRET
-            }
-            params = {
-                "query": keyword,
-                "display": min(display, 100),  # 최대 100개
-                "sort": "sim"  # 정확도순
-            }
-            
-            response = requests.get(url, headers=headers, params=params, timeout=10)
-            
-            if response.status_code == 200:
-                data = response.json()
-                items = data.get("items", [])
-                print(f"✅ 네이버 API 호출 성공: {keyword} ({len(items)}권)")
-                return items
-            else:
-                print(f"❌ 네이버 API 오류 ({keyword}): HTTP {response.status_code}")
-                return []
-                
-        except Exception as api_error:
-            print(f"❌ 네이버 API 호출 실패 ({keyword}): {type(api_error).__name__}: {str(api_error)}")
-            return []
-    
-    async def recommend_books(
-        self, 
-        summary: PsychologicalSummary, 
-        max_books: int = 5
-    ) -> List[BookRecommendation]:
-        """심리 분석 결과를 바탕으로 도서 추천"""
-        
-        all_books = []
-        
-        # 각 키워드로 책 검색 (더 많은 키워드 사용)
-        # 심리학 용어에는 "심리" 접두사 추가, 일반적인 단어는 그대로 검색
-        for keyword in summary.keywords[:5]:  # 상위 5개 키워드 사용
-            # 심리학 전문 용어인지 일반적인 단어인지 판단
-            # 일반적인 단어(직장, 관계, 스트레스, 감정 등)는 그대로, 전문 용어는 "심리" 접두사 추가
-            search_query = keyword
-            # 전문 용어 패턴 체크 (예: "치료", "치유", "인지", "행동" 등이 포함된 경우)
-            if any(term in keyword for term in ["치료", "치유", "인지", "행동", "트라우마", "불안", "우울"]):
-                search_query = f"심리 {keyword}"
-            else:
-                # 일반적인 단어는 그대로 검색하되, 필요시 "자기계발" 또는 "심리" 추가
-                search_query = keyword
-            
-            books = await self.search_books_via_api(search_query, display=5)
-            all_books.extend(books)
-        
-        # 중복 제거 (ISBN 기준)
-        unique_books = {book['isbn']: book for book in all_books if book.get('isbn')}.values()
-        
-        if not unique_books:
-            return []
-        
-        # Claude에게 가장 적합한 책 선택 요청
-        book_selection_prompt = f"""다음은 사용자의 심리 상담 요약입니다:
-
-주요 고민: {', '.join(summary.main_concerns)}
-감정 상태: {', '.join(summary.emotions)}
-인지 패턴: {', '.join(summary.cognitive_patterns)}
-제안된 전략: {', '.join(summary.recommendations)}
-
-다음 도서 목록에서 가장 도움이 될 {max_books}권을 선택하고, 각 책이 왜 도움이 되는지 설명해주세요:
-
-{json.dumps([{"title": b.get("title", ""), "author": b.get("author", ""), "description": b.get("description", ""), "isbn": b.get("isbn", "")} for b in list(unique_books)[:15]], ensure_ascii=False, indent=2)}
-
-다음 JSON 형식으로만 응답하세요:
-{{
-  "selected_books": [
-    {{
-      "isbn": "ISBN코드",
-      "relevance_reason": "이 책이 도움이 되는 구체적인 이유 (2-3문장)"
-    }}
-  ]
-}}"""
-
-        response = self.client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=2000,
-            messages=[{"role": "user", "content": book_selection_prompt}]
-        )
-        
-        # JSON 파싱
-        response_text = response.content[0].text
-        if "```json" in response_text:
-            response_text = response_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in response_text:
-            response_text = response_text.split("```")[1].split("```")[0].strip()
-        
-        selection_data = json.loads(response_text)
-        
-        # 선택된 책 정보 매핑
-        isbn_to_book = {book['isbn']: book for book in unique_books}
-        
-        recommendations = []
-        for selected in selection_data['selected_books'][:max_books]:
-            isbn = selected['isbn']
-            if isbn in isbn_to_book:
-                book = isbn_to_book[isbn]
-                recommendations.append(BookRecommendation(
-                    title=book.get('title', '').replace('<b>', '').replace('</b>', ''),
-                    author=book.get('author', '').replace('<b>', '').replace('</b>', ''),
-                    publisher=book.get('publisher', ''),
-                    description=book.get('description', '').replace('<b>', '').replace('</b>', ''),
-                    isbn=isbn,
-                    cover_image=book.get('image', ''),
-                    link=book.get('link', ''),
-                    relevance_reason=selected['relevance_reason']
-                ))
-        
-        return recommendations
 

@@ -22,11 +22,18 @@ import gradio as gr
 from datetime import datetime
 from typing import List, Tuple
 import json
-import concurrent.futures
+import os
 
-from config import ANTHROPIC_API_KEY
-from services import PsychologyChatbot, CounselingAnalyzer, BookRecommender
-from models import PsychologicalSummary, BookRecommendation
+from dotenv import load_dotenv
+load_dotenv()
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+NAVER_CLIENT_ID = os.getenv("NAVER_CLIENT_ID")
+NAVER_CLIENT_SECRET = os.getenv("NAVER_CLIENT_SECRET")
+
+from core.psychology_chatbot import PsychologyChatbot
+from core.counseling_analyzer import CounselingAnalyzer
+from core.book_recommender import BookRecommender
+from core.models import PsychologicalSummary, BookRecommendation
 
 # 서비스 인스턴스 생성
 chatbot = PsychologyChatbot(ANTHROPIC_API_KEY)
