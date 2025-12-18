@@ -30,15 +30,12 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 NAVER_CLIENT_ID = os.getenv("NAVER_CLIENT_ID")
 NAVER_CLIENT_SECRET = os.getenv("NAVER_CLIENT_SECRET")
 
-from core.psychology_chatbot import PsychologyChatbot
-from core.counseling_analyzer import CounselingAnalyzer
-from core.book_recommender import BookRecommender
-from core.models import PsychologicalSummary, BookRecommendation
+# CrewAI Multi-Agent Orchestrator
+from core_crewai.crew_orchestrator import CrewOrchestrator
+from core_crewai.models import PsychologicalSummary, BookRecommendation
 
-# 서비스 인스턴스 생성
-chatbot = PsychologyChatbot(ANTHROPIC_API_KEY)
-analyzer = CounselingAnalyzer(ANTHROPIC_API_KEY)
-recommender = BookRecommender(ANTHROPIC_API_KEY)
+# 서비스 인스턴스 생성 (CrewAI Orchestrator)
+orchestrator = CrewOrchestrator()
 
 # 대화 저장소 및 분석 상태 추적
 conversation_history = []
@@ -58,6 +55,17 @@ def count_assistant_messages(history: List) -> int:
                 # 튜플 형식인 경우 (하위 호환성)
                 count += 1
     return count
+
+
+def clean_message(msg: dict) -> dict:
+    """
+    메시지에서 role과 content만 추출 (Anthropic API 호환)
+    Gradio가 추가하는 metadata 등 불필요한 필드 제거
+    """
+    return {
+        "role": msg.get("role", "user"),
+        "content": msg.get("content", "")
+    }
 
 
 def format_analysis_only(summary: PsychologicalSummary) -> str:
@@ -120,7 +128,7 @@ def format_analysis_result(summary: PsychologicalSummary, books: List) -> str:
     return result
 
 
-async def chat_with_bot(message: str, history: List) -> Tuple[List, str]:
+async def chat_with_bot(message: str, history: List) -> Tuple[List, str, bool, str]:
     """
     심리 상담 챗봇과 대화
     5회 이상의 assistant 응답을 받으면 자동으로 분석 및 추천 실행
@@ -130,23 +138,20 @@ async def chat_with_bot(message: str, history: List) -> Tuple[List, str]:
         history: 대화 기록 (Gradio 6.0 형식)
     
     Returns:
-        (업데이트된 대화 기록, 상태 메시지)
+        (업데이트된 대화 기록, 상태 메시지, 장르 드롭다운 표시 여부, 장르 안내 메시지)
     """
     global conversation_history, analysis_done
     
     if not message.strip():
         return history, "메시지를 입력해주세요."
     
-    # Gradio 6.0 형식에서 메시지 리스트로 변환
+    # Gradio 6.0 형식에서 메시지 리스트로 변환 (메타데이터 제거)
     messages = []
     if history:
         if isinstance(history[0], dict):
             for msg in history:
                 if "role" in msg and "content" in msg:
-                    messages.append({
-                        "role": msg["role"],
-                        "content": msg["content"]
-                    })
+                    messages.append(clean_message(msg))
         elif isinstance(history[0], tuple):
             for user_msg, bot_msg in history:
                 messages.append({"role": "user", "content": user_msg})
@@ -167,8 +172,9 @@ async def chat_with_bot(message: str, history: List) -> Tuple[List, str]:
             closing_prompt = "\n\n[중요: 이것이 이번 상담의 마지막 응답입니다. 사용자에게 따뜻하고 격려하는 마무리 인사를 하되, 추가 질문을 하지 말고 상담을 자연스럽게 마무리해주세요. 예: '오늘 대화를 통해 많은 것을 나눈 것 같습니다. 앞으로도 힘내시길 바라며, 필요하시면 언제든 다시 찾아주세요.'와 같은 형식으로 마무리하세요.]"
             messages[-1]["content"] = message + closing_prompt
         
-        # 챗봇 응답 생성
-        response = chatbot.chat(messages)
+        # CrewAI Orchestrator를 통한 챗봇 응답 생성
+        # orchestrator.chat()는 이제 (응답, 분석준비여부) 튜플 반환
+        response, analysis_ready = orchestrator.chat(message, history)
         
         # 대화 기록 업데이트
         conversation_history = messages + [{"role": "assistant", "content": response}]
@@ -180,14 +186,17 @@ async def chat_with_bot(message: str, history: List) -> Tuple[List, str]:
         # assistant 메시지 개수 확인
         assistant_count = count_assistant_messages(history)
         
-        # 5회 이상의 assistant 응답을 받았고, 아직 분석을 하지 않았다면 자동 분석 실행
-        if assistant_count >= 5 and not analysis_done:
+        # LLM이 정보 수집 완료를 판단했거나, 5회 이상 대화했다면 자동 분석 실행
+        if (analysis_ready or assistant_count >= 5) and not analysis_done:
             status = f"✅ 응답 생성 완료 ({len(conversation_history)}개 메시지)\n\n"
-            status += "🔍 충분한 대화가 이루어졌습니다. 자동으로 분석을 시작합니다..."
+            if analysis_ready:
+                status += "🤖 AI가 충분한 정보를 수집했다고 판단했습니다. 자동으로 분석을 시작합니다..."
+            else:
+                status += "🔍 5회 대화가 완료되었습니다. 자동으로 분석을 시작합니다..."
             
-            # 심리 분석만 실행 (책 추천은 나중에)
+            # 심리 분석만 실행 (책 추천은 나중에) - CrewAI Orchestrator 사용
             try:
-                summary = analyzer.analyze_conversation(conversation_history)
+                summary = orchestrator.analyze_conversation(conversation_history)
                 
                 # 전역 변수에 저장
                 global current_summary
@@ -207,7 +216,10 @@ async def chat_with_bot(message: str, history: List) -> Tuple[List, str]:
                 })
                 
                 analysis_done = True
-                status += "\n✅ 심리 분석 완료! 책 추천을 원하시면 '📚 책 추천받기' 버튼을 눌러주세요."
+                status += "\n✅ 심리 분석 완료! 선호 장르를 선택한 후 '📚 책 추천받기' 버튼을 눌러주세요."
+                
+                # 장르 선택 UI 표시
+                return history, status, True, "💡 장르를 선택하면 더 정확한 추천을 받을 수 있습니다."
                 
             except Exception as analysis_error:
                 import traceback
@@ -218,24 +230,28 @@ async def chat_with_bot(message: str, history: List) -> Tuple[List, str]:
                     "content": f"⚠️ {error_msg}"
                 })
                 status += f"\n❌ 분석 실패: {str(analysis_error)}"
+                return history, status, False, ""
         else:
             if analysis_done:
                 status = f"✅ 응답 생성 완료 ({len(conversation_history)}개 메시지) - 분석 완료됨"
+                return history, status, True, "💡 장르를 선택하면 더 정확한 추천을 받을 수 있습니다."
             else:
-                remaining = 5 - assistant_count
                 status = f"✅ 응답 생성 완료 ({len(conversation_history)}개 메시지)\n"
-                status += f"💡 {remaining}회 더 대화하면 자동으로 분석이 시작됩니다."
+                status += f"💡 AI가 충분한 정보를 수집했다고 판단하면 자동으로 분석이 시작됩니다.\n"
+                if assistant_count < 5:
+                    remaining = 5 - assistant_count
+                    status += f"   (또는 {remaining}회 더 대화 후 자동 분석)"
         
-        return history, status
+        return history, status, False, ""
     
     except Exception as e:
         error_msg = f"죄송합니다. 오류가 발생했습니다: {str(e)}"
         history.append({"role": "user", "content": message})
         history.append({"role": "assistant", "content": error_msg})
-        return history, f"❌ 오류: {str(e)}"
+        return history, f"❌ 오류: {str(e)}", False, ""
 
 
-async def manual_analyze_and_recommend(history: List) -> Tuple[List, str]:
+async def manual_analyze_and_recommend(history: List, selected_genre: str) -> Tuple[List, str, bool, str]:
     """
     수동으로 분석 및 도서 추천 실행
     - 분석이 안 되어 있으면: 심리 분석 수행 + 책 추천 제안
@@ -243,29 +259,27 @@ async def manual_analyze_and_recommend(history: List) -> Tuple[List, str]:
     
     Args:
         history: 대화 기록
+        selected_genre: 선택된 장르
     
     Returns:
-        (업데이트된 대화 기록, 상태 메시지)
+        (업데이트된 대화 기록, 상태 메시지, 장르 드롭다운 표시 여부, 장르 안내 메시지)
     """
     global conversation_history, analysis_done, current_summary, books_recommended
     
-    # 히스토리에서 메시지 리스트로 변환
+    # 히스토리에서 메시지 리스트로 변환 (메타데이터 제거)
     messages = []
     if history:
         if isinstance(history[0], dict):
             for msg in history:
                 if "role" in msg and "content" in msg:
-                    messages.append({
-                        "role": msg["role"],
-                        "content": msg["content"]
-                    })
+                    messages.append(clean_message(msg))
         elif isinstance(history[0], tuple):
             for user_msg, bot_msg in history:
                 messages.append({"role": "user", "content": user_msg})
                 messages.append({"role": "assistant", "content": bot_msg})
     
     if not messages:
-        return history, "❌ 대화 내용이 없습니다. 먼저 상담을 진행해주세요."
+        return history, "❌ 대화 내용이 없습니다. 먼저 상담을 진행해주세요.", False, ""
     
     # conversation_history 업데이트
     conversation_history = messages
@@ -273,14 +287,17 @@ async def manual_analyze_and_recommend(history: List) -> Tuple[List, str]:
     try:
         # 이미 책 추천이 완료된 경우
         if books_recommended:
-            return history, "ℹ️ 이미 책 추천이 완료되었습니다. 대화를 초기화하고 다시 시도해주세요."
+            return history, "ℹ️ 이미 책 추천이 완료되었습니다. 대화를 초기화하고 다시 시도해주세요.", False, ""
         
         # 분석이 이미 완료된 경우 -> 책 추천만 수행
         if analysis_done and current_summary:
-            status = "📚 책을 검색하고 추천해드리겠습니다. 잠시만 기다려주세요..."
+            status = f"📚 '{selected_genre}' 장르 중심으로 책을 검색하고 추천해드리겠습니다. 잠시만 기다려주세요..."
             
-            # 네이버 API를 통한 도서 추천
-            books = await recommender.recommend_books(current_summary, max_books=5)
+            # 장르 정보를 summary에 추가
+            current_summary.genre = selected_genre
+            
+            # CrewAI Orchestrator를 통한 도서 추천
+            books = orchestrator.recommend_books_from_summary(current_summary, max_books=5)
             
             # 책 추천 결과를 채팅 메시지로 추가
             books_result = format_books_recommendation(books, current_summary)
@@ -298,7 +315,8 @@ async def manual_analyze_and_recommend(history: List) -> Tuple[List, str]:
             books_recommended = True
             status = f"✅ 책 추천 완료! ({len(books)}권 추천)"
             
-            return history, status
+            # 장르 드롭다운 숨기기
+            return history, status, False, ""
         
         # 분석이 안 되어 있는 경우 -> 심리 분석 수행 + 책 추천 제안
         # 먼저 AI의 안내 메시지를 채팅에 추가
@@ -314,8 +332,8 @@ async def manual_analyze_and_recommend(history: List) -> Tuple[List, str]:
         
         status = "🔍 분석을 시작합니다. 잠시만 기다려주세요..."
         
-        # 심리 분석 실행
-        summary = analyzer.analyze_conversation(conversation_history)
+        # CrewAI Orchestrator를 통한 심리 분석 실행
+        summary = orchestrator.analyze_conversation(conversation_history)
         
         # 전역 변수에 저장
         current_summary = summary
@@ -334,26 +352,27 @@ async def manual_analyze_and_recommend(history: List) -> Tuple[List, str]:
         })
         
         analysis_done = True
-        status = "✅ 심리 분석 완료! 책 추천을 원하시면 다시 '📚 책 추천받기' 버튼을 눌러주세요."
+        status = "✅ 심리 분석 완료! 선호 장르를 선택한 후 '📚 책 추천받기' 버튼을 눌러주세요."
         
-        return history, status
+        # 장르 선택 UI 표시
+        return history, status, True, "💡 장르를 선택하면 더 정확한 추천을 받을 수 있습니다."
     
     except Exception as e:
         import traceback
         error_detail = traceback.format_exc()
         print(f"수동 분석 중 오류: {error_detail}")
         error_msg = f"분석 중 오류가 발생했습니다: {str(e)}"
-        return history, f"❌ {error_msg}"
+        return history, f"❌ {error_msg}", False, ""
 
 
-def clear_conversation() -> Tuple[List, str]:
+def clear_conversation() -> Tuple[List, str, bool, str]:
     """대화 기록 초기화"""
     global conversation_history, analysis_done, current_summary, books_recommended
     conversation_history = []
     analysis_done = False
     current_summary = None
     books_recommended = False
-    return [], "🔄 대화 기록이 초기화되었습니다."
+    return [], "🔄 대화 기록이 초기화되었습니다.", False, ""
 
 
 def export_conversation() -> str:
@@ -381,14 +400,20 @@ with gr.Blocks(
     gr.Markdown("""
     # 🧠 심리 상담 챗봇 + 📚 도서 추천 시스템
     
-    AI 기반 심리 상담을 받고, **5회 이상 대화하면 자동으로** 맞춤형 도서를 추천받으세요.
+    **CrewAI 멀티 에이전트 시스템** 기반 심리 상담 및 도서 추천 서비스
     
     ### 사용 방법
     1. 고민이나 감정을 자유롭게 이야기하세요
-    2. **5회 이상 대화하면 자동으로 분석 및 도서 추천이 시작됩니다**
+    2. **AI가 충분한 정보를 수집했다고 판단하면 자동으로 분석이 시작됩니다**
+       - 또는 5회 대화 후 자동 분석 (안전장치)
     3. 추천된 도서를 통해 도움을 받으세요
     
-    **상담 프레임워크:** 인지행동치료(CBT), 자기결정이론, 스트레스 대처 전략
+    ### 멀티 에이전트 시스템
+    - **Counselor Agent**: 공감적 경청과 데이터 수집 (LLM이 정보 충분성 판단)
+    - **Psychological Analyzer Agent**: SKILL.md 프레임워크 기반 심층 심리 분석
+    - **Book Recommender Agent**: 맞춤형 독서 치료 도서 추천
+    
+    **분석 프레임워크:** SKILL.md (인지심리학, 사회심리학, 임상심리학, 발달심리학, 신경과학)
     """)
     
     # 상태 표시
@@ -419,6 +444,16 @@ with gr.Blocks(
         )
         submit_btn = gr.Button("전송", scale=1, variant="primary", size="lg")
     
+    # 장르 선택 (분석 후 표시)
+    genre_dropdown = gr.Dropdown(
+        label="📖 선호하는 책 장르를 선택해주세요",
+        choices=["자기계발", "심리학", "소설", "에세이", "인문", "경제/경영", "기타"],
+        value="자기계발",
+        interactive=True,
+        visible=False
+    )
+    genre_info = gr.Markdown("", visible=False)
+    
     # 컨트롤 버튼
     with gr.Row():
         recommend_btn = gr.Button("📚 책 추천받기", variant="primary", size="lg")
@@ -438,10 +473,28 @@ with gr.Blocks(
     
     ### 💡 안내사항
     
-    - **자동 분석**: 5회 이상의 상담 응답을 받으면 자동으로 심리 분석과 도서 추천이 시작됩니다
+    - **🤖 지능형 분석**: AI가 충분한 정보를 수집했다고 판단하면 자동으로 분석 시작
+      - AI 판단 기준: 주요 고민, 감정, 상황, 원인 인식, 대처 방식 파악 완료
+      - 안전장치: 5회 대화 후 자동 분석 (정보 부족 시)
     - **수동 분석**: 언제든지 "📚 책 추천받기" 버튼을 클릭하여 분석 및 추천을 받을 수 있습니다
     - **대화 기록**: 모든 대화 내용이 위에 표시됩니다
     - **개인정보**: 민감한 개인정보는 입력하지 마세요
+    
+    ### 🤖 CrewAI 멀티 에이전트 시스템
+    
+    이 시스템은 세 개의 전문 AI 에이전트가 협력하여 작동합니다:
+    
+    1. **Counselor Agent** 🧑‍⚕️
+       - 공감적 경청과 핵심 정보 수집
+       - SKILL.md의 사회심리학 원리 적용
+       
+    2. **Psychological Analyzer Agent** 🧠
+       - SKILL.md 프레임워크 기반 6단계 분석
+       - 인지/사회/임상/발달 심리학 통합 분석
+       
+    3. **Book Recommender Agent** 📚
+       - 심리 분석 결과 기반 맞춤 도서 추천
+       - 네이버 도서 API 활용
     
     ⚠️ **이 챗봇은 전문적인 심리 상담을 대체할 수 없습니다.**
     위기 상황이나 심각한 심리적 문제가 있다면 전문가와 상담하세요.
@@ -450,31 +503,31 @@ with gr.Blocks(
     # 이벤트 핸들러
     async def submit_message(message, history):
         """메시지 전송 처리 (async)"""
-        new_history, status = await chat_with_bot(message, history)
-        return new_history, status, ""
+        new_history, status, show_genre, genre_msg = await chat_with_bot(message, history)
+        return new_history, status, "", gr.update(visible=show_genre), gr.update(value=genre_msg, visible=show_genre)
     
     submit_btn.click(
         fn=submit_message,
         inputs=[msg_input, chatbot_interface],
-        outputs=[chatbot_interface, status_box, msg_input]
+        outputs=[chatbot_interface, status_box, msg_input, genre_dropdown, genre_info]
     )
     
     msg_input.submit(
         fn=submit_message,
         inputs=[msg_input, chatbot_interface],
-        outputs=[chatbot_interface, status_box, msg_input]
+        outputs=[chatbot_interface, status_box, msg_input, genre_dropdown, genre_info]
     )
     
     # 책 추천받기 버튼 이벤트
     recommend_btn.click(
         fn=manual_analyze_and_recommend,
-        inputs=[chatbot_interface],
-        outputs=[chatbot_interface, status_box]
+        inputs=[chatbot_interface, genre_dropdown],
+        outputs=[chatbot_interface, status_box, genre_dropdown, genre_info]
     )
     
     clear_btn.click(
         fn=clear_conversation,
-        outputs=[chatbot_interface, status_box]
+        outputs=[chatbot_interface, status_box, genre_dropdown, genre_info]
     )
     
     export_btn.click(
@@ -489,15 +542,21 @@ with gr.Blocks(
     gr.Markdown("""
     ---
     
-    Made with ❤️ using Claude AI and Gradio
+    Made with ❤️ using CrewAI, Claude AI (Sonnet 4), SKILL.md Framework, and Gradio
+    
+    **Architecture**: Multi-Agent System with Sequential Workflow
     """)
 
 
 # 앱 실행
 if __name__ == "__main__":
     print("=" * 60)
-    print("심리 상담 챗봇 + 도서 추천 Gradio 데모")
+    print("CrewAI 멀티 에이전트 심리 상담 + 도서 추천 시스템")
     print("=" * 60)
+    print("\n🤖 에이전트 시스템:")
+    print("  - Counselor Agent (경청 & 데이터 수집)")
+    print("  - Psychological Analyzer Agent (SKILL.md 기반 분석)")
+    print("  - Book Recommender Agent (맞춤 도서 추천)")
     print("\n서버를 시작합니다...")
     print("브라우저에서 자동으로 열립니다.")
     print("=" * 60 + "\n")

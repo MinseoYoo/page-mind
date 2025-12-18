@@ -1,6 +1,26 @@
-# 심리 상담 챗봇 + 도서 추천 시스템
+# 심리 상담 챗봇 + 도서 추천 시스템 (CrewAI Multi-Agent)
 
-AI 기반 심리 상담 및 네이버 도서 검색 API를 활용한 맞춤형 도서 추천 시스템입니다.
+**CrewAI 멀티 에이전트 시스템** 기반 심리 상담 및 네이버 도서 검색 API를 활용한 맞춤형 도서 추천 시스템입니다.
+
+## 🤖 멀티 에이전트 아키텍처
+
+이 시스템은 **3개의 전문 AI 에이전트**가 순차적으로 협력하여 작동합니다:
+
+1. **Counselor Agent** 🧑‍⚕️
+   - 공감적 경청과 핵심 정보 수집
+   - SKILL.md 사회심리학 원리 적용
+   - **LLM이 정보 충분성을 자율 판단** (Tool Calling)
+   - 3-6턴 자연스러운 대화
+
+2. **Psychological Analyzer Agent** 🧠
+   - SKILL.md 프레임워크 기반 6단계 심층 분석
+   - 인지/사회/임상/발달/신경과학 통합
+   - Biopsychosocial 모델 적용
+
+3. **Book Recommender Agent** 📚
+   - 심리 분석 결과 기반 맞춤 도서 검색
+   - 네이버 도서 API 활용
+   - 독서 치료(Bibliotherapy) 전문
 
 ## 📋 목차
 
@@ -9,6 +29,8 @@ AI 기반 심리 상담 및 네이버 도서 검색 API를 활용한 맞춤형 �
 - [프로젝트 구조](#-프로젝트-구조)
 - [설치 방법](#-설치-방법)
 - [사용 방법](#-사용-방법)
+- [심층 분석 프로세스](#-심층-분석-프로세스-skillmd-기반)
+- [하이브리드 도서 랭킹 알고리즘](#-하이브리드-도서-랭킹-알고리즘)
 - [API 엔드포인트](#-api-엔드포인트)
 - [예시](#-예시)
 - [환경 변수](#-환경-변수)
@@ -33,22 +55,34 @@ AI 기반 심리 상담 및 네이버 도서 검색 API를 활용한 맞춤형 �
 - **Biopsychosocial 통합**: 생물학적, 심리적, 사회적 요인 통합 분석
 - 5회 이상 대화 후 자동 실행
 
-### 3. 도서 추천
-- 네이버 도서 검색 API 활용
-- 심리 분석 결과 기반 맞춤 도서 검색
-- Claude AI의 스마트 추천 알고리즘
-- 각 도서별 추천 이유 제공
+### 3. 도서 추천 (하이브리드 랭킹)
+- **네이버 도서 검색 API 활용**: 실시간 도서 데이터
+- **심리 분석 결과 기반 맞춤 검색**: 키워드 자동 생성
+- **하이브리드 랭킹 알고리즘**:
+  - 📅 **최신성 점수** (40%): 출판일 기반 지수 감쇠
+  - 🎯 **관련도 점수** (40%): 검색 순위 기반 로그 스케일
+  - 📚 **장르 매칭 점수** (20%): 사용자 선호 장르 키워드 매칭
+- **Claude AI 추천 이유**: 각 도서별 심리적 연관성 설명
 
 ## 🛠 기술 스택
 
+### Multi-Agent Framework
+- **CrewAI** - 멀티 에이전트 오케스트레이션
+- **Sequential Workflow** - 순차적 에이전트 실행
+
 ### Backend
-- **Python 3.10+** - 프로그래밍 언어
+- **Python 3.12+** - 프로그래밍 언어
 - **Pydantic** - 데이터 검증 및 모델링
+- **uv** - 빠른 Python 패키지 관리자 (선택사항)
 
 ### AI/ML
-- **Anthropic Claude** - 대화 생성 및 분석
-- **Claude Sonnet 4** - 최신 언어 모델
+- **Anthropic Claude Sonnet 4** - 최신 언어 모델
 - **Tool Calling** - 구조화된 심리 분석
+- **SKILL.md Framework** - 심리학 분석 프레임워크
+- **Hybrid Ranking Algorithm** - 다차원 도서 추천 알고리즘
+  - 지수 감쇠 기반 최신성 평가
+  - 로그 스케일 관련도 점수
+  - 키워드 기반 장르 매칭
 
 ### External APIs
 - **Naver Search API** - 도서 검색
@@ -56,37 +90,64 @@ AI 기반 심리 상담 및 네이버 도서 검색 API를 활용한 맞춤형 �
 ### UI
 - **Gradio** - 사용자 친화적 웹 인터페이스
 
-## 📁 프로젝트 구조
+## 📁 프로젝트 구조 (CrewAI Multi-Agent)
 
 ```
-play-with-mcp/
-├── models.py              # Pydantic 데이터 모델
-│   ├── Message, ChatRequest, ChatResponse
-│   ├── SummaryRequest, PsychologicalSummary
-│   └── BookRecommendation, CounselingResult
+pagemind/
+├── core_crewai/                   # 핵심 모듈 (CrewAI 기반)
+│   ├── __init__.py                # 패키지 초기화
+│   ├── config.py                  # 설정 관리 (API 키, CrewAI 설정)
+│   ├── models.py                  # Pydantic 데이터 모델
+│   │   ├── Message, PsychologicalSummary
+│   │   └── BookRecommendation, CounselingResult
+│   │
+│   ├── agents.py                  # CrewAI 에이전트 정의
+│   │   ├── create_counselor_agent()
+│   │   ├── create_psychological_analyzer_agent()
+│   │   └── create_book_recommender_agent()
+│   │
+│   ├── tasks.py                   # CrewAI 태스크 정의
+│   │   ├── create_counseling_task()
+│   │   ├── create_analysis_task()
+│   │   └── create_book_recommendation_task()
+│   │
+│   ├── crew_orchestrator.py      # 멀티 에이전트 오케스트레이터
+│   │   └── CrewOrchestrator (워크플로우 관리)
+│   │
+│   ├── counselor_tools.py         # Counselor Agent Tool (분석 준비 신호)
+│   ├── crewai_tools.py            # CrewAI Tools (네이버 도서 검색)
+│   └── book_reranker.py           # 하이브리드 도서 랭킹 알고리즘
+│       └── 날짜/관련도/장르 기반 스마트 재정렬
 │
-├── config.py              # 환경 변수 설정
-│   └── API 키 로딩 (dotenv)
+├── app_gradio.py                  # Gradio 웹 앱 (메인)
+│   └── CrewOrchestrator 통합
 │
-├── services.py            # 비즈니스 로직
-│   ├── PsychologyChatbot (경청 중심 상담)
-│   ├── CounselingAnalyzer (Tool Calling 기반 6단계 분석)
-│   └── BookRecommender (네이버 API 기반 도서 추천)
-│
-├── app_gradio.py          # Gradio 웹 앱 (메인)
-│   └── 5회 상담 후 자동 분석 플로우
-│
-├── SKILL.md               # 심리학 분석 프레임워크 (참고 문서)
-├── requirements.txt       # Python 의존성
-└── env.example            # 환경 변수 예시
+├── SKILL.md                       # 심리학 분석 프레임워크 (참고 문서)
+├── requirements.txt               # Python 의존성 (CrewAI 포함)
+├── pyproject.toml                 # 프로젝트 메타데이터 (uv 패키지 관리)
+├── uv.lock                        # uv 의존성 잠금 파일
+└── .env                           # 환경 변수
+```
+
+### 아키텍처 플로우
+
+```mermaid
+graph LR
+    User[User] -->|Message| Counselor[Counselor Agent]
+    Counselor -->|Conversation Data| Analyzer[Psychological Analyzer Agent]
+    Analyzer -->|PsychologicalSummary| Recommender[Book Recommender Agent]
+    Recommender -->|BookRecommendations| User
+    
+    SKILLMD[SKILL.md Framework] -.->|Strong Integration| Analyzer
+    SKILLMD -.->|Light Reference| Counselor
 ```
 
 ## 🚀 설치 방법
 
 ### 1. 필수 요구사항
 
-- **Python 3.10 이상**
-- **pip** 패키지 관리자
+- **Python 3.12 이상**
+- **pip** 또는 **uv** 패키지 관리자
 - **네이버 개발자 계정** (API 키 필요)
 - **Anthropic API 키**
 
@@ -99,9 +160,27 @@ cd play-with-mcp
 
 ### 3. 의존성 설치
 
+#### 방법 1: pip 사용 (기본)
+
 ```bash
 pip install -r requirements.txt
 ```
+
+#### 방법 2: uv 사용 (빠른 설치, 권장)
+
+```bash
+# uv 설치 (처음 한 번만)
+pip install uv
+
+# 의존성 설치
+uv pip install -r requirements.txt
+```
+
+주요 의존성:
+- `crewai>=0.28.0` - 멀티 에이전트 프레임워크
+- `anthropic>=0.40.0` - Claude AI
+- `gradio>=4.0.0` - 웹 UI
+- `pydantic>=2.5.0` - 데이터 모델
 
 ### 4. 환경 변수 설정
 
@@ -160,24 +239,52 @@ python app_gradio.py
 
 ## 🧪 테스트
 
-앱을 실행하고 실제 대화를 통해 기능을 테스트할 수 있습니다:
+### 1. 통합 테스트 실행
 
-1. **기본 상담 모드**: 챗봇과 대화하여 경청과 탐색 질문 확인
-2. **심층 분석**: 5회 이상 대화 후 자동 분석 실행 확인
-3. **도서 추천**: 분석 후 책 추천 기능 확인
+```bash
+python test_crewai_integration.py
+```
+
+테스트 내용:
+- **테스트 1**: Counselor Agent와 대화
+- **테스트 2**: Psychological Analyzer Agent 분석
+- **테스트 3**: Book Recommender Agent 추천
+- **테스트 4**: 전체 워크플로우 (Sequential)
+
+### 2. Gradio 웹 앱 테스트
+
+```bash
+python app_gradio.py
+```
+
+1. **기본 상담 모드**: Counselor Agent와 대화
+2. **심층 분석**: 5회 이상 대화 후 Analyzer Agent 자동 실행
+3. **도서 추천**: Recommender Agent를 통한 맞춤 도서 제공
 
 ## 🔬 심층 분석 프로세스 (SKILL.md 기반)
 
-### 분석 아키텍처
+### 멀티 에이전트 아키텍처
 
-시스템은 **역할 분리** 원칙을 따릅니다:
+시스템은 **CrewAI Sequential Workflow**를 따릅니다:
 
-- **PsychologyChatbot**: 경청과 탐색 (가볍고 빠름)
-- **CounselingAnalyzer**: 체계적 분석 (깊고 전문적)
+- **Counselor Agent**: 경청과 데이터 수집 (가볍고 빠름, 3-5턴)
+- **Psychological Analyzer Agent**: SKILL.md 프레임워크 기반 체계적 분석 (깊고 전문적)
+- **Book Recommender Agent**: 심리 분석 결과 기반 맞춤 도서 추천
+
+### SKILL.md 통합 수준
+
+- **Counselor Agent**: 🔵 Light Integration
+  - 사회심리학의 공감 원리 참고
+  - 주요 목표는 정보 수집
+  
+- **Psychological Analyzer Agent**: 🔴 Strong Integration
+  - SKILL.md 전체 프레임워크 내장
+  - 6단계 체계적 분석 수행
+  - 5개 이론적 기초 (인지/사회/임상/발달/신경과학) 적용
 
 ### 6단계 Tool Calling 분석
 
-5회 이상 대화 후, CounselingAnalyzer가 Claude의 Tool Calling을 활용하여 다음 6단계 분석을 수행합니다:
+5회 이상 대화 후, Psychological Analyzer Agent (CrewAI)가 SKILL.md 프레임워크를 활용하여 다음 6단계 분석을 수행합니다:
 
 #### 1단계: 심리학적 현상 정의
 - 관찰되는 행동/사고 패턴 식별
@@ -234,6 +341,72 @@ python app_gradio.py
 - 인지 패턴 식별
 - 권장 전략 제시
 - 도서 검색 키워드 (심리학 용어 + 일반 단어)
+
+## 📊 하이브리드 도서 랭킹 알고리즘
+
+### 알고리즘 개요
+
+Book Recommender Agent는 네이버 도서 API 검색 결과를 **하이브리드 랭킹 알고리즘**으로 재정렬하여 최적의 도서를 추천합니다.
+
+### 3가지 평가 차원
+
+#### 1. 최신성 점수 (Recency Score) - 40%
+
+```python
+score = 0.5 ^ (years_ago / half_life)
+```
+
+- **지수 감쇠 모델**: 출판일이 오래될수록 점수 감소
+- **반감기 3년**: 3년 전 책은 최근 책의 50% 점수
+- **범위**: 0.0 ~ 1.0 (최근 책일수록 1.0에 가까움)
+
+#### 2. 관련도 점수 (Relevance Score) - 40%
+
+```python
+score = 1.0 - log(1 + normalized_position * 9) / log(10)
+```
+
+- **로그 스케일**: 검색 결과 상위권일수록 높은 점수
+- **위치 기반**: 네이버 API의 검색 순위 반영
+- **범위**: 0.0 ~ 1.0 (1위는 1.0, 순위가 낮을수록 감소)
+
+#### 3. 장르 매칭 점수 (Genre Match Score) - 20%
+
+```python
+keywords = genre_keywords[preferred_genre]
+matches = count_keyword_matches(title, description, keywords)
+```
+
+- **키워드 매칭**: 제목 + 설명에서 장르별 키워드 탐색
+- **지원 장르**:
+  - 자기계발 (성장, 습관, 목표, 동기부여)
+  - 심리학 (마음, 감정, 치유, 회복)
+  - 소설 (이야기, 픽션, 문학)
+  - 에세이 (수필, 일상, 경험)
+  - 인문 (철학, 사회, 역사)
+  - 경제/경영 (비즈니스, 마케팅, 리더십)
+- **점수**: 1.0 (강한 매칭) / 0.7 (약한 매칭) / 0.3 (매칭 없음)
+
+### 최종 점수 계산
+
+```python
+final_score = 0.4 * recency + 0.4 * relevance + 0.2 * genre_match
+```
+
+**가중치 설계 철학:**
+- **최신성 40%**: 심리학/자기계발 분야는 최신 연구와 트렌드가 중요
+- **관련도 40%**: 검색 알고리즘의 키워드 매칭 신뢰
+- **장르 매칭 20%**: 사용자 선호 반영 (보조 지표)
+
+### 예시
+
+| 책 제목 | 출판일 | 순위 | 최신성 | 관련도 | 장르 | **최종 점수** |
+|---------|--------|------|--------|--------|------|---------------|
+| 마음챙김 명상 | 2024-03 | 1위 | 0.95 | 1.00 | 1.00 | **0.980** |
+| 감정 조절의 기술 | 2022-08 | 3위 | 0.74 | 0.85 | 0.70 | **0.756** |
+| 행복의 심리학 | 2018-01 | 2위 | 0.32 | 0.92 | 1.00 | **0.696** |
+
+→ "마음챙김 명상"이 최신성과 관련도 모두 높아 1순위 추천
 
 ## 📡 API 엔드포인트
 
@@ -480,10 +653,21 @@ curl -X POST "http://localhost:8000/analyze-and-recommend" \
 **증상:** `No module named 'anthropic'` 등
 
 **해결 방법:**
+
+**pip 사용:**
 ```bash
 pip install -r requirements.txt
-# 또는 개별 설치
-pip install anthropic fastapi uvicorn python-dotenv pydantic requests gradio
+```
+
+**uv 사용 (빠른 설치):**
+```bash
+pip install uv
+uv pip install -r requirements.txt
+```
+
+**개별 설치:**
+```bash
+pip install anthropic crewai crewai-tools python-dotenv pydantic requests gradio
 ```
 
 ### 2. 네이버 API 오류
@@ -527,10 +711,11 @@ taskkill /PID <PID> /F
 - [스트레스 대처 이론](https://www.apa.org/topics/stress)
 
 ### 기술 문서
-- [FastAPI 공식 문서](https://fastapi.tiangolo.com/)
+- [CrewAI 공식 문서](https://docs.crewai.com/)
 - [Anthropic Claude API](https://docs.anthropic.com/)
 - [네이버 검색 API](https://developers.naver.com/docs/search/book/)
 - [Gradio 공식 문서](https://www.gradio.app/docs/)
+- [uv - 빠른 Python 패키지 관리자](https://github.com/astral-sh/uv)
 
 ## 🤝 기여하기
 
@@ -547,10 +732,11 @@ taskkill /PID <PID> /F
 
 ## 🙏 감사의 말
 
-- [Anthropic](https://www.anthropic.com/) - Claude API 제공
+- [CrewAI](https://www.crewai.com/) - 멀티 에이전트 프레임워크
+- [Anthropic](https://www.anthropic.com/) - Claude Sonnet 4 API
 - [네이버 개발자 센터](https://developers.naver.com/) - 도서 검색 API
-- [FastAPI](https://fastapi.tiangolo.com/) - 웹 프레임워크
 - [Gradio](https://www.gradio.app/) - UI 프레임워크
+- **SKILL.md** - 심리학 분석 프레임워크
 
 ## 📧 문의
 
@@ -558,6 +744,11 @@ taskkill /PID <PID> /F
 
 ---
 
-**마지막 업데이트:** 2025년 12월  
-**버전:** 1.0.1
+**마지막 업데이트:** 2025년 12월 18일  
+**버전:** 3.1.0 (Hybrid Ranking Algorithm)
+**Architecture:** CrewAI Sequential Multi-Agent System  
+**New Features:** 
+- 하이브리드 도서 랭킹 알고리즘 (날짜/관련도/장르 가중치)
+- uv 패키지 관리자 지원
+- Python 3.12+ 최적화
 

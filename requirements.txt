@@ -6,6 +6,10 @@ pydantic>=2.5.0
 # AI 및 LLM
 anthropic>=0.40.0
 
+# CrewAI - Multi-Agent Framework
+crewai>=0.28.0
+crewai-tools>=0.8.0
+
 # HTTP 요청
 requests>=2.31.0
 

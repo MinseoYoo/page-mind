@@ -32,6 +32,7 @@ class PsychologicalSummary(BaseModel):
     cognitive_patterns: List[str]  # 인지 패턴
     recommendations: List[str]  # 제안된 전략
     keywords: List[str]  # 도서 검색 키워드
+    genre: Optional[str] = None  # 선호 장르 (자기계발, 심리학, 소설, 에세이, 인문, 경제/경영, 기타)
 
 
 class BookRecommendation(BaseModel):
