@@ -1,6 +1,7 @@
 """
-Book Re-ranking Algorithm
-날짜 기반 가중치와 관련도를 결합한 하이브리드 랭킹
+책 추천 과정에서 추천 순위 재정렬에 사용되는 알고리즘
+날짜 기반 가중치와 + 장르 매칭 가중치 + 관련도를 결합한 하이브리드 랭킹
+실제 call은 crew_orchestrator.py에서 이루어짐
 """
 
 from typing import List, Dict, Optional
@@ -9,20 +10,9 @@ import math
 
 
 def parse_pubdate(pubdate: str) -> Optional[datetime]:
-    """
-    네이버 도서 API의 pubdate 파싱
-    
-    Args:
-        pubdate: YYYYMMDD 형식의 출판일 문자열
-        
-    Returns:
-        datetime 객체 또는 None (파싱 실패 시)
-    """
     if not pubdate or len(pubdate) < 8:
-        return None
-    
+        return None 
     try:
-        # YYYYMMDD 형식 파싱
         year = int(pubdate[:4])
         month = int(pubdate[4:6])
         day = int(pubdate[6:8])
@@ -30,7 +20,7 @@ def parse_pubdate(pubdate: str) -> Optional[datetime]:
     except (ValueError, IndexError):
         return None
 
-
+# 1. 최신 도서에 +가중치 부여
 def calculate_recency_score(pubdate: str, half_life_years: float = 3.0) -> float:
     """
     출판일 기반 최신성 점수 계산 (지수 감쇠)
@@ -57,7 +47,7 @@ def calculate_recency_score(pubdate: str, half_life_years: float = 3.0) -> float
     # 0.0 ~ 1.0 범위로 클리핑
     return max(0.0, min(1.0, score))
 
-
+# 2. 검색 결과 순위 기반 관련도 점수 계산
 def calculate_relevance_score(position: int, total_results: int) -> float:
     """
     검색 결과 순위 기반 관련도 점수 계산
@@ -79,7 +69,7 @@ def calculate_relevance_score(position: int, total_results: int) -> float:
     
     return max(0.0, min(1.0, score))
 
-
+# 3. 장르 매칭 점수 계산        
 def calculate_genre_match_score(book_description: str, book_title: str, preferred_genre: Optional[str]) -> float:
     """
     장르 매칭 점수 계산
@@ -115,13 +105,14 @@ def calculate_genre_match_score(book_description: str, book_title: str, preferre
     
     # 매칭 비율에 따라 점수 계산
     if matches >= 2:
-        return 1.0  # 강한 매칭
+        return 1.0  
     elif matches == 1:
-        return 0.7  # 약한 매칭
+        return 0.7  
     else:
-        return 0.3  # 매칭 없음
+        return 0.3  
 
 
+# 4. 최종 하이브리드 리랭킹
 def rerank_books(
     books: List[Dict], 
     preferred_genre: Optional[str] = None,
@@ -185,15 +176,10 @@ def rerank_books(
     return [book for _, book in scored_books[:max_results]]
 
 
+# 책 추천 결과를 형식에 맞추어 변환
 def format_book_for_recommendation(book: Dict) -> Dict:
     """
     네이버 API 응답을 BookRecommendation 형식으로 변환
-    
-    Args:
-        book: 네이버 도서 API 응답 항목
-        
-    Returns:
-        BookRecommendation 형식의 dict
     """
     # HTML 태그 제거
     def clean_html(text: str) -> str:

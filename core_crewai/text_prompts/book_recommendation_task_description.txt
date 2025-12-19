@@ -1,0 +1,46 @@
+다음 심리 분석 결과를 바탕으로 관련 도서를 검색하세요:
+
+## 심리 분석 결과
+
+**주요 고민**: {main_concerns}
+**감정 상태**: {emotions}
+**검색 키워드**: {keywords}{genre_info}
+
+## 작업
+
+1. **키워드별 검색**: 제공된 3개의 키워드 각각으로 네이버 도서 API 검색
+   - 키워드 1: "{keyword1}"
+   - 키워드 2: "{keyword2}"
+   - 키워드 3: "{keyword3}"
+
+2. **메타데이터 수집**: 각 검색 결과에서 다음 정보를 수집
+   - title, author, publisher, description
+   - isbn, pubdate (출판일 - 중요!)
+   - cover_image, link
+
+3. **중복 제거**: ISBN 기준으로 중복된 책 제거
+
+## 중요
+
+- **모든 검색 결과를 반환** (선택하지 말고 모두 수집)
+- **pubdate 필드를 반드시 포함** (재정렬에 사용됨)
+- HTML 태그 제거 (예: <b>, </b>)
+
+## 출력 형식 (JSON)
+
+{{
+  "all_books": [
+    {{
+      "title": "책 제목",
+      "author": "저자",
+      "publisher": "출판사",
+      "description": "책 설명",
+      "isbn": "ISBN",
+      "pubdate": "YYYYMMDD",
+      "cover_image": "표지 URL",
+      "link": "네이버 도서 링크"
+    }},
+    ...
+  ]
+}}
+

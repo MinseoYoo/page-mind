@@ -25,7 +25,7 @@ class CrewOrchestrator:
     """
     CrewAI 기반 멀티 에이전트 오케스트레이터
     
-    Sequential Workflow:
+    순차적 워크플로우:
     1. Counselor Agent: 대화 및 데이터 수집 (CrewAI Agent 사용)
     2. Psychological Analyzer Agent: SKILL.md 기반 심리 분석 (CrewAI Crew 사용)
     3. Book Recommender Agent: 도서 검색 및 추천 (CrewAI Crew 사용)
@@ -38,7 +38,7 @@ class CrewOrchestrator:
         self.analyzer_agent = None
         self.recommender_agent = None
         
-        # Conversation state
+        # 대화 상태
         self.conversation_history: List[Dict] = []
     
     def _initialize_agents(self):
@@ -353,8 +353,8 @@ class CrewOrchestrator:
         print("CrewAI 멀티 에이전트 상담 워크플로우 시작")
         print(f"{'='*60}\n")
         
-        # Phase 1: Counseling (다중 턴 대화)
-        print("Phase 1: Counseling Agent와 대화 중...")
+        # 1단계: 상담 (다중 턴 대화)
+        print("1단계: Counseling Agent와 대화 중...")
         print(f"{'='*60}\n")
         
         conversation = []
@@ -376,9 +376,9 @@ class CrewOrchestrator:
                 # 테스트를 위한 더미 응답
                 current_message = f"네, 알겠습니다. (턴 {turn + 2})"
         
-        # Phase 2: Psychological Analysis
+        # 2단계: 심리 분석
         print(f"\n{'='*60}")
-        print("Phase 2: Psychological Analyzer Agent 분석 중...")
+        print("2단계: Psychological Analyzer Agent 분석 중...")
         print(f"{'='*60}\n")
         
         summary = self.analyze_conversation(conversation)
@@ -390,9 +390,9 @@ class CrewOrchestrator:
         print(f"- 권장사항: {summary.recommendations}")
         print(f"- 키워드: {summary.keywords}\n")
         
-        # Phase 3: Book Recommendation
+        # 3단계: 도서 추천
         print(f"{'='*60}")
-        print("Phase 3: Book Recommender Agent 도서 추천 중...")
+        print("3단계: Book Recommender Agent 도서 추천 중...")
         print(f"{'='*60}\n")
         
         books = self.recommend_books_from_summary(summary, max_books=5)
@@ -423,11 +423,11 @@ class CrewOrchestrator:
         """
         print("\n분석 및 추천 시작...")
         
-        # Phase 1: 심리 분석
+        # 1단계: 심리 분석
         summary = self.analyze_conversation(conversation_history)
         print(f"✓ 심리 분석 완료 (키워드: {len(summary.keywords)}개)")
         
-        # Phase 2: 도서 추천
+        # 2단계: 도서 추천
         books = self.recommend_books_from_summary(summary, max_books=5)
         print(f"✓ 도서 추천 완료 ({len(books)}권)\n")
         
