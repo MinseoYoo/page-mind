@@ -20,9 +20,9 @@ load_dotenv()
 # 새로운 CrewAI 구조 사용
 import sys
 project_root = os.path.abspath(os.path.dirname(__file__))
-pagemind_path = os.path.join(project_root, 'pagemind', 'src')
-if pagemind_path not in sys.path:
-    sys.path.insert(0, pagemind_path)
+src_path = os.path.join(project_root, 'src')
+if src_path not in sys.path:
+    sys.path.insert(0, src_path)
 
 from pagemind.crew import Pagemind
 from pagemind.models import PsychologicalSummary, BookRecommendation
@@ -37,6 +37,8 @@ conversation_history = []
 analysis_done = False  # 분석이 이미 수행되었는지 추적
 current_summary = None  # 현재 분석 결과 저장
 books_recommended = False  # 책 추천이 완료되었는지 추적
+waiting_for_analysis_response = False  # 분석 의향 응답 대기 중
+counseling_ended_turn = -1  # 상담 종료 턴 번호
 
 
 def count_assistant_messages(history: List) -> int:
@@ -120,19 +122,10 @@ def detect_counseling_end(response: str) -> bool:
     return any(phrase in response_lower for phrase in end_phrases)
 
 
-def add_analysis_button_to_message(message: str) -> str:
-    """메시지에 분석/추천 또는 추가 대화 선택 버튼 추가 (HTML)"""
-    button_html = """
-<div style="margin-top: 15px; padding: 15px; background-color: #f0f4ff; border-radius: 8px; border: 2px solid #4a90e2;">
-    <p style="margin: 0 0 10px 0; font-weight: bold; color: #2c3e50;">📊 다음 행동을 선택해주세요</p>
-    <p style="margin: 0 0 15px 0; color: #555; font-size: 0.9em;">심리 분석 및 맞춤 도서 추천을 받거나, 조금 더 대화를 이어갈 수 있습니다.</p>
-    <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
-        <span class="analysis-choice" data-action="analyze" style="display: inline-block; padding: 12px 18px; background-color: #4a90e2; color: white; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 0.95em; user-select: none; transition: background-color 0.3s;">🔍 분석과 책 추천을 원해요</span>
-        <span class="analysis-choice" data-action="chat_more" style="display: inline-block; padding: 12px 18px; background-color: #6c7a89; color: white; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 0.95em; user-select: none; transition: background-color 0.3s;">💬 조금 더 대화하고 싶어요</span>
-    </div>
-</div>
-"""
-    return message + "\n\n" + button_html
+# 더 이상 사용하지 않는 함수 (채팅 내에서 자연스럽게 질문하도록 변경)
+# def add_analysis_button_to_message(message: str) -> str:
+#     """메시지에 분석 질문 추가"""
+#     return message
 
 
 def format_books_recommendation(books: List[BookRecommendation], summary: PsychologicalSummary) -> str:
@@ -245,18 +238,63 @@ def run_analysis_crew(conversation_history: List[Dict]) -> PsychologicalSummary:
         result = crew.kickoff(inputs=inputs)
         result_text = str(result)
         
-        # JSON 추출
+        # JSON 추출 - 견고한 방식
+        json_text = None
+        
+        # 방법 1: ```json 코드블록에서 추출
         if "```json" in result_text:
-            json_text = result_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in result_text:
-            json_text = result_text.split("```")[1].split("```")[0].strip()
-        else:
-            start_idx = result_text.find("{")
-            end_idx = result_text.rfind("}") + 1
-            if start_idx >= 0 and end_idx > start_idx:
-                json_text = result_text[start_idx:end_idx]
-            else:
-                raise ValueError("JSON을 찾을 수 없습니다")
+            try:
+                parts = result_text.split("```json")
+                if len(parts) > 1:
+                    json_part = parts[1].split("```")[0].strip()
+                    json.loads(json_part)
+                    json_text = json_part
+            except (json.JSONDecodeError, IndexError):
+                pass
+        
+        # 방법 2: 일반 코드블록에서 추출
+        if not json_text and "```" in result_text:
+            try:
+                parts = result_text.split("```")
+                for i in range(1, len(parts), 2):
+                    potential_json = parts[i].strip()
+                    if potential_json.startswith(("json", "javascript", "js")):
+                        potential_json = potential_json.split("\n", 1)[1] if "\n" in potential_json else potential_json
+                    if potential_json.startswith("{"):
+                        try:
+                            json.loads(potential_json)
+                            json_text = potential_json
+                            break
+                        except json.JSONDecodeError:
+                            continue
+            except (IndexError, AttributeError):
+                pass
+        
+        # 방법 3: 직접 { } 찾기
+        if not json_text:
+            try:
+                start_idx = result_text.find("{")
+                if start_idx >= 0:
+                    brace_count = 0
+                    end_idx = -1
+                    for i in range(start_idx, len(result_text)):
+                        if result_text[i] == "{":
+                            brace_count += 1
+                        elif result_text[i] == "}":
+                            brace_count -= 1
+                            if brace_count == 0:
+                                end_idx = i + 1
+                                break
+                    
+                    if end_idx > start_idx:
+                        potential_json = result_text[start_idx:end_idx]
+                        json.loads(potential_json)
+                        json_text = potential_json
+            except (json.JSONDecodeError, ValueError):
+                pass
+        
+        if not json_text:
+            raise ValueError(f"유효한 JSON을 찾을 수 없습니다. 응답 내용:\n{result_text[:500]}...")
         
         analysis_data = json.loads(json_text)
         
@@ -291,9 +329,12 @@ def run_book_recommendation_crew(summary: PsychologicalSummary, preferred_genre:
         "keywords": summary.keywords
     }, ensure_ascii=False)
     
-    # Task description을 동적으로 수정하여 analysis_task의 출력을 포함
+    # Task description을 동적으로 수정하여 analysis_task의 출력과 장르 정보를 포함
     from crewai import Task
     book_task = crew_instance.book_recommendation_task()
+    
+    # 장르 정보 포맷팅
+    genre_info = f"\n**사용자 선호 장르**: {preferred_genre}" if preferred_genre else ""
     
     # analysis_task의 출력을 포함한 description 생성
     enhanced_description = f"""
@@ -302,8 +343,12 @@ def run_book_recommendation_crew(summary: PsychologicalSummary, preferred_genre:
 ```json
 {analysis_output}
 ```
+{genre_info}
 
 위 분석 결과를 바탕으로 관련 도서를 검색하세요. keywords 배열에서 3개의 키워드를 추출하여 각각으로 네이버 도서 API를 사용하여 검색하세요.
+
+**중요**: 사용자가 선호 장르를 지정했다면, 해당 장르의 책을 우선적으로 검색하세요. 
+검색 키워드와 함께 "{preferred_genre}" 장르를 고려하여 검색하세요.
 """
     
     # Task를 새로 생성 (description 수정)
@@ -324,18 +369,66 @@ def run_book_recommendation_crew(summary: PsychologicalSummary, preferred_genre:
         result = crew.kickoff()
         result_text = str(result)
         
-        # JSON 추출
+        # JSON 추출 - 더 견고한 방식
+        json_text = None
+        
+        # 방법 1: ```json 코드블록에서 추출
         if "```json" in result_text:
-            json_text = result_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in result_text:
-            json_text = result_text.split("```")[1].split("```")[0].strip()
-        else:
-            start_idx = result_text.find("{")
-            end_idx = result_text.rfind("}") + 1
-            if start_idx >= 0 and end_idx > start_idx:
-                json_text = result_text[start_idx:end_idx]
-            else:
-                raise ValueError("JSON을 찾을 수 없습니다")
+            try:
+                parts = result_text.split("```json")
+                if len(parts) > 1:
+                    json_part = parts[1].split("```")[0].strip()
+                    # 유효한 JSON인지 확인
+                    json.loads(json_part)
+                    json_text = json_part
+            except (json.JSONDecodeError, IndexError):
+                pass
+        
+        # 방법 2: 일반 코드블록에서 추출
+        if not json_text and "```" in result_text:
+            try:
+                parts = result_text.split("```")
+                for i in range(1, len(parts), 2):
+                    potential_json = parts[i].strip()
+                    # json, javascript 등의 태그 제거
+                    if potential_json.startswith(("json", "javascript", "js")):
+                        potential_json = potential_json.split("\n", 1)[1] if "\n" in potential_json else potential_json
+                    if potential_json.startswith("{"):
+                        try:
+                            json.loads(potential_json)
+                            json_text = potential_json
+                            break
+                        except json.JSONDecodeError:
+                            continue
+            except (IndexError, AttributeError):
+                pass
+        
+        # 방법 3: 직접 { } 찾기
+        if not json_text:
+            try:
+                start_idx = result_text.find("{")
+                if start_idx >= 0:
+                    # 중첩된 중괄호를 고려한 끝 위치 찾기
+                    brace_count = 0
+                    end_idx = -1
+                    for i in range(start_idx, len(result_text)):
+                        if result_text[i] == "{":
+                            brace_count += 1
+                        elif result_text[i] == "}":
+                            brace_count -= 1
+                            if brace_count == 0:
+                                end_idx = i + 1
+                                break
+                    
+                    if end_idx > start_idx:
+                        potential_json = result_text[start_idx:end_idx]
+                        json.loads(potential_json)
+                        json_text = potential_json
+            except (json.JSONDecodeError, ValueError):
+                pass
+        
+        if not json_text:
+            raise ValueError(f"유효한 JSON을 찾을 수 없습니다. 응답 내용:\n{result_text[:500]}...")
         
         search_data = json.loads(json_text)
         all_books = search_data.get("all_books", [])
@@ -405,7 +498,6 @@ def _generate_relevance_reason(book: Dict, summary: PsychologicalSummary, scores
 async def chat_with_bot(message: str, history: List) -> Tuple[List, str, bool, str]:
     """
     심리 상담 챗봇과 대화
-    signal_analysis_ready tool이 호출되면 자동으로 분석 시작
     
     Args:
         message: 사용자 메시지
@@ -414,7 +506,7 @@ async def chat_with_bot(message: str, history: List) -> Tuple[List, str, bool, s
     Returns:
         (업데이트된 대화 기록, 상태 메시지, 장르 드롭다운 표시 여부, 장르 안내 메시지)
     """
-    global conversation_history, analysis_done
+    global conversation_history, analysis_done, current_summary, books_recommended, waiting_for_analysis_response, counseling_ended_turn
     
     if not message.strip():
         return history, "메시지를 입력해주세요.", False, ""
@@ -435,80 +527,176 @@ async def chat_with_bot(message: str, history: List) -> Tuple[List, str, bool, s
     messages.append({"role": "user", "content": message})
     
     try:
-        # 새로운 CrewAI 구조를 통한 챗봇 응답 생성
-        # signal_analysis_ready tool 호출 여부 확인
-        response, analysis_ready = run_counseling_crew(message, messages[:-1])  # 현재 메시지 제외
+        # 분석 의향 응답 대기 중이면 긍정/부정 답변 감지
+        if waiting_for_analysis_response and not analysis_done:
+            user_response_lower = message.lower().strip()
+            
+            # 긍정 답변 감지
+            positive_keywords = ["네", "예", "좋아", "원해", "받고", "싶어", "부탁", "해주", "응", "그래", "ok", "okay", "yes"]
+            is_positive = any(keyword in user_response_lower for keyword in positive_keywords)
+            
+            # 부정 답변 감지
+            negative_keywords = ["아니", "싫어", "괜찮", "됐어", "안", "no", "더 대화", "더 이야기", "조금 더"]
+            is_negative = any(keyword in user_response_lower for keyword in negative_keywords)
+            
+            if is_positive:
+                # 긍정 답변 -> 장르 선택 요청
+                waiting_for_analysis_response = False
+                conversation_history = messages
+                
+                # 사용자 메시지 추가
+                history.append({"role": "user", "content": message})
+                
+                # 장르 선택 요청 메시지
+                genre_request_msg = """
+좋습니다! 심리 분석과 맞춤 도서 추천을 준비하겠습니다. 📚
+
+먼저 선호하시는 책 장르를 선택해주세요. 아래 드롭다운에서 선택하신 후, 다시 메시지를 보내주시면 분석과 추천을 시작합니다.
+
+**선택 가능한 장르:**
+- 자기계발
+- 심리학
+- 소설
+- 에세이
+- 인문
+- 경제/경영
+- 기타
+
+장르를 선택하셨나요? 선택하셨다면 "장르 선택 완료" 또는 아무 메시지나 보내주세요!
+"""
+                history.append({"role": "assistant", "content": genre_request_msg})
+                conversation_history.append({"role": "assistant", "content": genre_request_msg})
+                
+                status = "✅ 장르를 선택하고 메시지를 보내주세요."
+                return history, status, True, "💡 장르를 선택하면 더 정확한 추천을 받을 수 있습니다."
+            
+            elif is_negative:
+                # 부정 답변 -> 대화 계속
+                waiting_for_analysis_response = False
+                
+                # 일반 상담 계속
+                response, _ = run_counseling_crew(message, messages[:-1])
+                conversation_history = messages + [{"role": "assistant", "content": response}]
+                
+                history.append({"role": "user", "content": message})
+                history.append({"role": "assistant", "content": response})
+                
+                status = f"✅ 응답 생성 완료 ({len(conversation_history)}개 메시지)"
+                return history, status, False, ""
         
-        # 상담 종료 멘트 감지
-        counseling_ended = detect_counseling_end(response)
+        # 장르 선택 후 메시지 -> 분석 및 추천 실행
+        if waiting_for_analysis_response == False and analysis_done == False and len(messages) > counseling_ended_turn > 0:
+            # 장르 선택 관련 메시지 확인
+            genre_related = any(keyword in message.lower() for keyword in ["장르", "선택", "완료", "준비"])
+            
+            if genre_related or len(messages) > counseling_ended_turn + 3:
+                # 분석 및 추천 실행
+                conversation_history = messages
+                
+                history.append({"role": "user", "content": message})
+                
+                status = "🔍 심리 분석 및 책 추천을 시작합니다. 잠시만 기다려주세요..."
+                
+                try:
+                    # 심리 분석 실행
+                    summary = run_analysis_crew(conversation_history)
+                    current_summary = summary
+                    
+                    # 장르 드롭다운에서 선택된 값 가져오기 (기본값: 자기계발)
+                    # 이 부분은 Gradio 컴포넌트에서 자동으로 전달됨
+                    
+                    # 도서 추천 실행 (현재 선택된 장르 사용)
+                    # 이 시점에서 genre_dropdown의 값을 가져올 수 없으므로 기본값 사용
+                    # 실제로는 Gradio 이벤트에서 전달받아야 함
+                    books = run_book_recommendation_crew(summary, "자기계발")
+                    
+                    # 분석 결과와 책 추천을 함께 포맷팅
+                    combined_result = format_analysis_and_recommendation(summary, books)
+                    
+                    history.append({"role": "assistant", "content": combined_result})
+                    conversation_history.append({"role": "assistant", "content": combined_result})
+                    
+                    analysis_done = True
+                    books_recommended = True
+                    
+                    status = f"✅ 심리 분석 및 책 추천 완료! ({len(books)}권 추천)"
+                    return history, status, False, ""
+                    
+                except Exception as e:
+                    import traceback
+                    print(f"분석/추천 오류: {traceback.format_exc()}")
+                    error_msg = f"분석 중 오류가 발생했습니다: {str(e)}"
+                    history.append({"role": "assistant", "content": f"⚠️ {error_msg}"})
+                    status = f"❌ {error_msg}"
+                    return history, status, False, ""
         
-        # 대화 기록 업데이트 (원본 응답 저장)
+        # 일반 상담 대화
+        response, analysis_ready = run_counseling_crew(message, messages[:-1])
+        
+        # 대화 기록 업데이트
         conversation_history = messages + [{"role": "assistant", "content": response}]
         
         # Gradio 히스토리 업데이트
         history.append({"role": "user", "content": message})
+        history.append({"role": "assistant", "content": response})
         
-        # 상담 종료 멘트가 있으면 버튼 추가 (자동 실행하지 않음)
-        if counseling_ended and not analysis_done:
-            response_with_button = add_analysis_button_to_message(response)
-            history.append({"role": "assistant", "content": response_with_button})
-            # 상담 종료 멘트가 있으면 분석 준비 상태로 표시하지만 자동 실행하지 않음
-            status = f"✅ 응답 생성 완료 ({len(conversation_history)}개 메시지)\n\n"
-            status += "💡 위 메시지의 '🔍 상담 분석 및 책 추천받기' 버튼을 클릭하시면 심리 분석과 맞춤 도서 추천을 받으실 수 있습니다."
-            return history, status, False, ""
-        else:
-            history.append({"role": "assistant", "content": response})
-        
-        # signal_analysis_ready tool이 호출되었을 때만 자동 분석 실행
+        # signal_analysis_ready 도구가 호출되면 자동으로 분석 및 추천 실행
         if analysis_ready and not analysis_done:
-            status = f"✅ 응답 생성 완료 ({len(conversation_history)}개 메시지)\n\n"
-            status += "🤖 AI가 충분한 정보를 수집했다고 판단했습니다. 자동으로 분석을 시작합니다..."
+            status = f"✅ 응답 생성 완료 ({len(conversation_history)}개 메시지)\n\n🤖 AI가 충분한 정보를 수집했다고 판단했습니다.\n🔍 자동으로 심리 분석과 책 추천을 시작합니다..."
             
-            # 심리 분석만 실행 (책 추천은 나중에)
             try:
+                # 심리 분석 실행
                 summary = run_analysis_crew(conversation_history)
-                
-                # 전역 변수에 저장
-                global current_summary
                 current_summary = summary
                 
-                # 분석 결과만 채팅 메시지로 추가 (책 추천 제안 포함)
-                analysis_result = format_analysis_only(summary)
-                history.append({
-                    "role": "assistant",
-                    "content": analysis_result
-                })
+                # 도서 추천 실행 (기본 장르: 자기계발)
+                books = run_book_recommendation_crew(summary, "자기계발")
                 
-                # conversation_history에도 추가
-                conversation_history.append({
-                    "role": "assistant",
-                    "content": analysis_result
-                })
+                # 분석 결과와 책 추천을 함께 포맷팅
+                combined_result = format_analysis_and_recommendation(summary, books)
+                
+                # 결과를 채팅 메시지로 추가
+                history.append({"role": "assistant", "content": combined_result})
+                conversation_history.append({"role": "assistant", "content": combined_result})
                 
                 analysis_done = True
-                status += "\n✅ 심리 분석 완료! 선호 장르를 선택한 후 '📚 책 추천받기' 버튼을 눌러주세요."
+                books_recommended = True
                 
-                # 장르 선택 UI 표시
-                return history, status, True, "💡 장르를 선택하면 더 정확한 추천을 받을 수 있습니다."
-                
-            except Exception as analysis_error:
-                import traceback
-                print(f"분석 오류: {traceback.format_exc()}")
-                error_msg = f"분석 중 오류가 발생했습니다: {str(analysis_error)}"
-                history.append({
-                    "role": "assistant",
-                    "content": f"⚠️ {error_msg}"
-                })
-                status += f"\n❌ 분석 실패: {str(analysis_error)}"
+                status = f"✅ 심리 분석 및 책 추천 완료! ({len(books)}권 추천)"
                 return history, status, False, ""
-        else:
-            if analysis_done:
-                status = f"✅ 응답 생성 완료 ({len(conversation_history)}개 메시지) - 분석 완료됨"
-                return history, status, True, "💡 장르를 선택하면 더 정확한 추천을 받을 수 있습니다."
-            else:
-                status = f"✅ 응답 생성 완료 ({len(conversation_history)}개 메시지)\n"
-                status += f"💡 AI가 충분한 정보를 수집했다고 판단하면 자동으로 분석이 시작됩니다."
+                
+            except Exception as e:
+                import traceback
+                print(f"자동 분석/추천 오류: {traceback.format_exc()}")
+                error_msg = f"분석 중 오류가 발생했습니다: {str(e)}"
+                history.append({"role": "assistant", "content": f"⚠️ {error_msg}"})
+                status = f"❌ {error_msg}"
+                return history, status, False, ""
         
+        # 상담 종료 멘트 감지 (signal_analysis_ready 없이)
+        counseling_ended = detect_counseling_end(response)
+        
+        # 상담 종료 멘트만 있는 경우 (도구 호출 없음) - 분석 의향 물어보기
+        if counseling_ended and not analysis_done and not waiting_for_analysis_response and not analysis_ready:
+            waiting_for_analysis_response = True
+            counseling_ended_turn = len(messages)
+            
+            # 원래 응답에 분석 의향 질문 추가
+            response_with_question = conversation_history[-1]["content"] + "\n\n" + """
+---
+
+지금까지 많은 이야기를 나눠주셨는데요, 제가 이해한 내용을 바탕으로 **심리 분석과 맞춤 도서 추천**을 받아보시겠어요? 
+
+분석을 원하시면 "네" 또는 "좋아요"라고 답변해주시고, 조금 더 대화를 나누고 싶으시면 "아니요" 또는 "더 대화하고 싶어요"라고 말씀해주세요. 😊
+"""
+            history[-1]["content"] = response_with_question
+            conversation_history[-1]["content"] = response_with_question
+            
+            status_msg = f"✅ 응답 생성 완료 ({len(conversation_history)}개 메시지)\n💡 분석을 원하시는지 답변해주세요."
+            return history, status_msg, False, ""
+        
+        # 일반 상담 계속
+        status = f"✅ 응답 생성 완료 ({len(conversation_history)}개 메시지)"
         return history, status, False, ""
     
     except Exception as e:
@@ -630,11 +818,13 @@ async def manual_analyze_and_recommend(history: List, selected_genre: str) -> Tu
 
 def clear_conversation() -> Tuple[List, str, bool, str]:
     """대화 기록 초기화"""
-    global conversation_history, analysis_done, current_summary, books_recommended
+    global conversation_history, analysis_done, current_summary, books_recommended, waiting_for_analysis_response, counseling_ended_turn
     conversation_history = []
     analysis_done = False
     current_summary = None
     books_recommended = False
+    waiting_for_analysis_response = False
+    counseling_ended_turn = -1
     return [], "🔄 대화 기록이 초기화되었습니다.", False, ""
 
 
@@ -659,50 +849,8 @@ with gr.Blocks(
     title="심리 상담 챗봇 + 도서 추천"
 ) as demo:
     
-    # JavaScript 이벤트 리스너 추가 (버튼 클릭 감지)
-    demo.load(
-        fn=None,
-        js="""
-        () => {
-            // 채팅 메시지 내 선택 버튼 클릭 감지를 위한 이벤트 위임
-            setInterval(() => {
-                document.querySelectorAll('.analysis-choice').forEach(btn => {
-                    if (!btn.dataset.listenerAdded) {
-                        btn.dataset.listenerAdded = 'true';
-                        btn.addEventListener('click', function(e) {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            this.style.backgroundColor = '#357abd';
-                            this.style.pointerEvents = 'none';
-                            
-                            const action = this.dataset.action || '';
-                            const buttons = Array.from(document.querySelectorAll('button'));
-                            
-                            if (action === 'analyze') {
-                                const recommendBtn = buttons.find(b => b.textContent.includes('책 추천받기'));
-                                if (recommendBtn) {
-                                    recommendBtn.click();
-                                }
-                                this.textContent = '분석/추천 실행 중...';
-                            } else if (action === 'chat_more') {
-                                const inputBox = document.querySelector('textarea');
-                                if (inputBox) {
-                                    inputBox.focus();
-                                }
-                                this.textContent = '계속 대화해요';
-                                // 잠시 후 다시 클릭 가능하도록 복원
-                                setTimeout(() => {
-                                    this.style.backgroundColor = '#6c7a89';
-                                    this.style.pointerEvents = 'auto';
-                                }, 800);
-                            }
-                        });
-                    }
-                });
-            }, 400);
-        }
-        """
-    )
+    # 페이지 로드 시 초기화
+    demo.load(fn=None)
     
     # 헤더
     gr.Markdown("""
@@ -712,9 +860,11 @@ with gr.Blocks(
     
     ### 사용 방법
     1. 고민이나 감정을 자유롭게 이야기하세요
-    2. **AI가 충분한 정보를 수집했다고 판단하면 자동으로 분석이 시작됩니다**
-       - AI가 자연스럽게 상담을 마무리하고 분석을 시작합니다
-    3. 추천된 도서를 통해 도움을 받으세요
+    2. **AI가 충분히 대화를 나눈 후 분석을 원하는지 물어봅니다**
+       - "네" 또는 "좋아요"라고 답하면 심리 분석과 책 추천이 시작됩니다
+       - "아니요" 또는 "더 대화하고 싶어요"라고 답하면 상담이 계속됩니다
+    3. 선호하는 책 장르를 선택하고 분석을 받으세요
+    4. 추천된 도서를 통해 도움을 받으세요
     
     ### 멀티 에이전트 시스템
     - **Counselor Agent**: 공감적 경청과 데이터 수집 (LLM이 정보 충분성 판단)
@@ -764,7 +914,6 @@ with gr.Blocks(
     
     # 컨트롤 버튼
     with gr.Row():
-        recommend_btn = gr.Button("📚 책 추천받기", variant="primary", size="lg")
         clear_btn = gr.Button("🔄 대화 초기화", variant="secondary")
         export_btn = gr.Button("💾 대화 내보내기", variant="secondary")
     
@@ -784,7 +933,7 @@ with gr.Blocks(
     - **🤖 지능형 분석**: AI가 충분한 정보를 수집했다고 판단하면 자동으로 분석 시작
       - AI 판단 기준: 주요 고민, 감정, 상황, 원인 인식, 대처 방식 파악 완료
       - 상담이 자연스럽게 끝나는 시점에 자동으로 분석이 시작됩니다
-    - **수동 분석**: 언제든지 "📚 책 추천받기" 버튼을 클릭하여 분석 및 추천을 받을 수 있습니다
+    - **자연스러운 흐름**: 상담이 끝나면 AI가 분석을 원하는지 물어봅니다
     - **대화 기록**: 모든 대화 내용이 위에 표시됩니다
     - **개인정보**: 민감한 개인정보는 입력하지 마세요
     
@@ -826,11 +975,11 @@ with gr.Blocks(
         outputs=[chatbot_interface, status_box, msg_input, genre_dropdown, genre_info]
     )
     
-    # 책 추천받기 버튼 이벤트
-    recommend_btn.click(
-        fn=manual_analyze_and_recommend,
-        inputs=[chatbot_interface, genre_dropdown],
-        outputs=[chatbot_interface, status_box, genre_dropdown, genre_info]
+    # 장르 선택 변경 이벤트
+    genre_dropdown.change(
+        fn=lambda genre: genre,
+        inputs=[genre_dropdown],
+        outputs=[]
     )
     
     clear_btn.click(
