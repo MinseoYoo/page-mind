@@ -146,10 +146,30 @@ graph LR
 
 ### 1. 필수 요구사항
 
-- **Python 3.12 이상**
+- **Python 3.12 이상** (필수)
 - **pip** 또는 **uv** 패키지 관리자
 - **네이버 개발자 계정** (API 키 필요)
 - **Anthropic API 키**
+
+#### Python 버전 확인 및 설치 (Mac)
+
+```bash
+# 현재 Python 버전 확인
+python3 --version
+
+# Python 3.12 미만인 경우 Homebrew로 설치 (권장)
+brew install python@3.12
+
+# 또는 pyenv 사용
+brew install pyenv
+pyenv install 3.12.0
+pyenv local 3.12.0
+
+# 설치 후 버전 확인
+python3.12 --version
+```
+
+**중요**: `crewai>=0.28.0`은 Python 3.10 이상이 필요하며, 이 프로젝트는 Python 3.12+를 권장합니다.
 
 ### 2. 프로젝트 클론
 
@@ -171,10 +191,20 @@ pip install -r requirements.txt
 ```bash
 # uv 설치 (처음 한 번만)
 pip install uv
+# 또는 Mac: brew install uv
 
-# 의존성 설치
-uv pip install -r requirements.txt
+# Python 3.12 명시적 설정 (필수!)
+uv python pin 3.12
+
+# 가상환경 생성 및 의존성 설치
+uv sync  # pyproject.toml 기반 (빈 dependencies인 경우)
+uv pip install -r requirements.txt  # requirements.txt 기반
+
+# 앱 실행 (uv 환경에서)
+uv run python app_gradio.py
 ```
+
+**중요**: uv 환경에서는 `uv python pin 3.12`로 Python 버전을 명시적으로 설정해야 합니다.
 
 주요 의존성:
 - `crewai>=0.28.0` - 멀티 에이전트 프레임워크
@@ -208,8 +238,19 @@ NAVER_CLIENT_SECRET=your-naver-client-secret
 
 ### Gradio 웹 앱 실행
 
+#### 방법 1: 일반 Python 환경
+
 ```bash
 python app_gradio.py
+# 또는
+python3.12 app_gradio.py
+```
+
+#### 방법 2: uv 환경 (권장)
+
+```bash
+# uv 환경에서 실행
+uv run python app_gradio.py
 ```
 
 브라우저가 자동으로 열립니다 (http://localhost:7860)
@@ -648,7 +689,57 @@ curl -X POST "http://localhost:8000/analyze-and-recommend" \
 
 ## 🔧 문제 해결
 
-### 1. ModuleNotFoundError
+### 1. Python 버전 오류 (Mac)
+
+**증상:** 
+- `ERROR: Could not find a version that satisfies the requirement crewai>=0.28.0`
+- `No matching distribution found for crewai>=0.28.0`
+- `No executables are provided by package 'crewai'; removing tool`
+
+**원인:** Python 버전이 3.10 미만입니다. `crewai>=0.28.0`은 Python 3.10 이상이 필요합니다.
+
+**해결 방법:**
+
+```bash
+# 1. 현재 Python 버전 확인
+python3 --version
+
+# 2. Python 3.12 설치 (Homebrew 사용)
+brew install python@3.12
+
+# 3. 설치된 Python 3.12로 프로젝트 실행
+python3.12 -m pip install -r requirements.txt
+python3.12 app_gradio.py
+
+# 또는 가상환경 사용 (권장)
+python3.12 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python app_gradio.py
+```
+
+**참고**: `entrypoints` 오류는 일반적으로 경고이며, Python 버전이 올바르면 정상 작동합니다.
+
+#### uv 환경에서의 해결 방법
+
+```bash
+# 1. Python 3.12 명시적 설정 (필수!)
+uv python pin 3.12
+
+# 2. 가상환경 재생성 및 의존성 설치
+uv sync
+uv pip install -r requirements.txt
+
+# 3. 설치 확인
+uv run python -c "import crewai; print('OK')"
+
+# 4. 앱 실행
+uv run python app_gradio.py
+```
+
+**중요**: uv는 자체 Python 버전 관리를 사용하므로, `uv python pin 3.12`로 명시적으로 Python 버전을 설정해야 합니다.
+
+### 2. ModuleNotFoundError
 
 **증상:** `No module named 'anthropic'` 등
 
@@ -670,7 +761,7 @@ uv pip install -r requirements.txt
 pip install anthropic crewai crewai-tools python-dotenv pydantic requests gradio
 ```
 
-### 2. 네이버 API 오류
+### 3. 네이버 API 오류
 
 **증상:** `401 Unauthorized` 또는 책 검색 실패
 
@@ -680,7 +771,7 @@ pip install anthropic crewai crewai-tools python-dotenv pydantic requests gradio
 - API 사용량 제한 확인 (하루 25,000회)
 - `.env` 파일의 `NAVER_CLIENT_ID`와 `NAVER_CLIENT_SECRET` 확인
 
-### 3. Anthropic API 오류
+### 4. Anthropic API 오류
 
 **증상:** `401 Unauthorized` 또는 대화 생성 실패
 
@@ -689,17 +780,21 @@ pip install anthropic crewai crewai-tools python-dotenv pydantic requests gradio
 - API 키가 유효한지 Anthropic 대시보드에서 확인
 - 사용량 제한 확인
 
-### 4. 포트 충돌
+### 5. 포트 충돌
 
 **증상:** `Address already in use`
 
 **해결 방법:**
 ```bash
 # 다른 포트로 실행
-uvicorn main:app --port 8001
+python app_gradio.py  # Gradio 앱의 경우 포트 변경은 코드 수정 필요
 
-# 또는 기존 프로세스 종료 (Windows)
-netstat -ano | findstr :8000
+# 또는 기존 프로세스 종료
+# Mac/Linux:
+lsof -ti:7860 | xargs kill -9
+
+# Windows:
+netstat -ano | findstr :7860
 taskkill /PID <PID> /F
 ```
 
